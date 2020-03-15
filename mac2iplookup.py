@@ -16,6 +16,7 @@ from twisted.internet import reactor, endpoints
 ##############################################
 HTTP_PORT = 8000
 POLLING_INTERVAL = 3600  # one hour 
+BROADCAST_IP = "192.168.1.255"
 LightList = {}
 LightEnumerators = []
 
@@ -44,7 +45,7 @@ class WizEnumerator(DatagramProtocol):
 # send broadcast datagram to enumerate all Wiz lights on the network   
     def queryLights(self) :
         print("  enumerator: Wiz")
-        self.transport.write(b'{"params":{"phoneIp":"127.0.0.0","phoneMac":"BEEFDEADBEEF","register":true},"id":10,"method":"registration"}',("192.168.1.255", self.WIZ_COMMAND_PORT))                 
+        self.transport.write(b'{"params":{"phoneIp":"127.0.0.0","phoneMac":"BEEFDEADBEEF","register":true},"id":10,"method":"registration"}',(BROADCAST_IP, self.WIZ_COMMAND_PORT))                 
                     
 ##############################################
 # Classes for web service
