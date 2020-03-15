@@ -17,10 +17,11 @@ you are comfortable with networking and linux, and have a network configuration
 that makes dynamic ip resolution useful -- this is intended for large networks,
 with many devices.  For many people it is easier to just use the
 DHCP server on your router to assign static ip addresses to your lights and
-other IoT devices.
+other IoT devices.  You have been warned!
 
 ## To Install and Use the Driver
-Install and provision your Wiz bulb using the phone app.  Note the bulb's IP address.
+Install and provision your Wiz bulb using the phone app.  Note the bulb's IP and MAC 
+addresses.
 
 On your Hubitat Elevation's admin page, select "Drivers Code", then click the
 "New Driver" button.  Paste the Groovy driver code from this repository into 
