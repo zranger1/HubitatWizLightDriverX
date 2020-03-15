@@ -77,7 +77,11 @@ root.
 ### Configuration
 The web service is configured to use port 8000 and to refresh the mac/ip address list
 at one hour intervals. If you want to change these defaults, use a text editor
-to edit the constants HTTP_PORT and POLLING_INTERVAL in the .py file.
+to edit the constants HTTP_PORT and POLLING_INTERVAL in the .py file.  
+
+A broadcast datagram is sent to enumerate Wiz bulbs. By default, the broadcast address
+is set to 192.168.1.255.  If neccessary, edit BROADCAST_IP in the .py file to use the
+proper broadcast address for your network.
 
 ### Starting and Stopping
 To start the service, ```python3 mac2iplookup.py``` or ```nohup python3 mac2iplookup.py &```
