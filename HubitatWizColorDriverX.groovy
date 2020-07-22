@@ -14,6 +14,7 @@
  *    2020-3-08   1.0           JEM       Added status requester, update to 1.0
  *    2020-3-13   1.01          JEM       Added duration to setLevel command to make RM happy
  *    2020-3-14   1.01x         JEM       Added http GET-based MAC to ip address resolution
+ *    2020-7-22   1.02x         JEM       Fix stray UDP timeout error message from hub
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
@@ -191,6 +192,7 @@ def getCurrentStatus(resched=true) {
                        [type: hubitat.device.HubAction.Type.LAN_TYPE_UDPCLIENT,
                        callback: parse,
                        timeout: 10,
+                       parseWarning : true,
                        destinationAddress: addr])                     
     try {    
       logDebug("sendCommand: ${cmd} to ip ${addr}")      
@@ -247,7 +249,13 @@ def parseLightParams(params) {
 }
 
 // handle command responses & status updates from bulb 
-def parse(String description) {
+def parse(String description) { 
+
+// ignore timeout errors    
+  def i = description.indexOf("UDPCLIENT_ERROR")
+  if (i != -1) { 
+      return
+  }    
 
 // is it a valid packet from the light?
   i = description.indexOf("payload")
@@ -293,7 +301,9 @@ def parse(String description) {
 // Switch commands 
 def on() {         
   WizCommandSet(["state":true])
-  sendEvent([name: "switch", value: "on"])   
+  sendEvent([name: "switch", value: "on"]) 
+  def test = now()
+
 }
 
 def off() {
