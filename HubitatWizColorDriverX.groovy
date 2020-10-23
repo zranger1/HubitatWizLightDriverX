@@ -1,6 +1,6 @@
 /**
  *
- *  File: HubitatWizLightDriverX
+ *  File: HubitatWizLightDriver
  *  Platform: Hubitat
  *
  *  Allows hubitat to control a wiz color bulb
@@ -13,8 +13,7 @@
  *    2020-1-12   0.1           JEM       Created
  *    2020-3-08   1.0           JEM       Added status requester, update to 1.0
  *    2020-3-13   1.01          JEM       Added duration to setLevel command to make RM happy
- *    2020-3-14   1.01x         JEM       Added http GET-based MAC to ip address resolution
- *    2020-7-22   1.02x         JEM       Fix stray UDP timeout error message from hub
+ *    2020-7-21   1.1.1         JEM       Use new Hub feature to fix unwanted logging of UDP timeouts.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
@@ -73,13 +72,13 @@ import groovy.transform.Field
     "Steampunk"
 ]
  
-def version() {"1.01x"}
+def version() {"1.1.1x"}
 def commandPort() { "38899" }
 def unknownString() { "none" }
 def statusPort()  { "38899" }  
 
 metadata {
-    definition (name: "Wiz Color Light Experimental", namespace: "jem", author: "JEM",importUrl: "") {
+    definition (name: "Wiz Color Light", namespace: "jem", author: "JEM",importUrl: "") {
         capability "Actuator"
         capability "SignalStrength"  
         capability "LightEffects"
@@ -90,7 +89,6 @@ metadata {
         capability "ColorTemperature"
         capability "ColorMode"     
         
-        command    "getIp"
         command    "pulse",[[name:"Delta*", type: "NUMBER",,description: "Change in intensity, positive or negative",constraints:[]],
                             [name:"Duration*", type: "NUMBER", description: "Duration in milliseconds", constraints:[]]]                           
         command    "setEffectSpeed", [[name: "Effect speed*", type: "NUMBER", description: "(0 to 200)", constraints:[]]]     
@@ -101,15 +99,9 @@ metadata {
 }
 
 preferences {
-    input("ip", "text", title: "IP Address", description: "IP address of Wiz light", required: false)    
-
-    input name: "pollingInterval", type: "number", title: "Time (seconds) between light status checks", defaultValue: 10
-    
-    input name: "macLookup", type : "bool", title: "Enable MAC lookup service",defaultValue: false   
-    input("macAddr", "text", title: "MAC Address", description: "MAC address of Wiz light", required: false)    
-    input("ipServer", "text", title: "MAC to IP server address", description: "Address of MAC->IP lookup server (ip:port)", required: false)    
-    
-    input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false       
+    input("ip", "text", title: "IP Address", description: "IP address of Wiz light", required: true)
+    input name: "pollingInterval", type: "number", title: "Time (seconds) between light status checks", defaultValue: 10    
+    input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false        
 }
 
 /**
@@ -127,17 +119,16 @@ def logDebug(String str) {
  * initialization & configuration
  */ 
 def installed(){
-    log.info "Wiz color light handler ${version()} installed."       
+    log.info "Wiz Color Light installed. Version${version()}."       
     initialize()
 }
 
 def updated() {
-    log.info "Wiz color light updated. ${version()}."
+    log.info "Wiz Color Light updated. Version ${version()}."
     initialize()
 }
  
 def initialize() {
-
     logDebug("initialize")
  
     unschedule()
@@ -150,8 +141,7 @@ def initialize() {
     sendEvent([name: "level", value: 100])  
     sendEvent([name: "saturation", value: 100])      
   
-    runIn(pollingInterval, getCurrentStatus)
-    runEvery1Hour(getIp)    
+    runIn(pollingInterval, getCurrentStatus)     
 }
 
 def refresh() {
@@ -169,6 +159,7 @@ def sendCommand(String cmd) {
   pkt = new hubitat.device.HubAction(cmd,
                      hubitat.device.Protocol.LAN,
                      [type: hubitat.device.HubAction.Type.LAN_TYPE_UDPCLIENT,
+                     parseWarning: true,
                      destinationAddress: addr])  
   try {    
     logDebug("sendCommand: ${cmd} to ip ${addr}")
@@ -179,8 +170,7 @@ def sendCommand(String cmd) {
   }      
 }
 
-def getCurrentStatus(resched=true) {
-  
+def getCurrentStatus(resched=true) {                             
   if (ip != null) {
     logDebug("getCurrentStatus")  
   
@@ -220,7 +210,7 @@ def WizCommandSet(paramsIn) {
 }
 
 def parseLightParams(params) {
-    lev = device.currentValue("level")  // TBD - slight hack here...
+    lev = device.currentValue("level")  
 
     if (params.containsKey("state")) {    
       sendEvent([name: "switch", value: params.state ? "on" : "off"])       
@@ -249,14 +239,12 @@ def parseLightParams(params) {
 }
 
 // handle command responses & status updates from bulb 
-def parse(String description) { 
+def parse(String description) {
 
-// ignore timeout errors    
+// ignore UDP timeout errors from the hub
   def i = description.indexOf("UDPCLIENT_ERROR")
-  if (i != -1) { 
-      return
-  }    
-
+  if (i != -1) { return }                                                                                             
+  
 // is it a valid packet from the light?
   i = description.indexOf("payload")
   if (i == -1) {
@@ -283,8 +271,12 @@ def parse(String description) {
     else if (json.containsKey("params")) {
       parseLightParams(json.params)  // command result packet
     }
+    else if (json.containsKey("setPilot")) {
+       // got response from command.  Uncomment logger if needed for debugging
+       // logDebug("parse: setPilot response logged");
+    }
     else {
-      logDebug(payload)
+      logDebug("parse: Unhandled packet. Ignored.")
     }             
   }
   catch(e) {
@@ -301,9 +293,7 @@ def parse(String description) {
 // Switch commands 
 def on() {         
   WizCommandSet(["state":true])
-  sendEvent([name: "switch", value: "on"]) 
-  def test = now()
-
+  sendEvent([name: "switch", value: "on"])   
 }
 
 def off() {
@@ -350,6 +340,10 @@ def updateCurrentStatus(hsv,ct,effectNo,inParse = false) {
     name = lightEffects[effectNo.toInteger()]
     sendEvent([name:"effectNumber", value:effectNo])
     sendEvent([name:"effectName", value:name]) 
+    
+// experimental -- encode effect in color temp for Hubitat scenes
+    ct = 6000+effectNo;    
+    sendEvent([name: "colorTemperature", value: ct])    
 
 // if we're setting effect to <none>, restore the previously
 // set mode and color.  Do nothing if no previous mode, or if  
@@ -397,8 +391,30 @@ def setSaturation(value) {
 // ColorTemperature & ColorMode commands
 def setColorTemperature(ct) {
   logDebug("setColorTemperature(${ct})")
-  ct = validateCT(ct)
   
+// Experimental -- valid color temp range is 2500-6000k
+// We use 6001-6032 to allow Hubitat's scene's app to read
+// and set effects.
+// first, validate color temp.
+  ct = (ct >= 2500) ? ct : 2500;  // limit lower color temp
+  
+// if it's above the max allowable color, check to see if it's
+// an effect code  
+  if (ct > 6000) {
+  
+// if it's an effect code, set the current effect, then set the
+// (now fake) color temp to the coded value  
+     if ((ct > 6000) && (ct <= 6032)) {
+       setEffect(ct - 6000);
+       updateCurrentStatus(null,ct,null)         
+       return;
+     }
+     else {
+     ct = 6000;
+     }
+  } 
+ 
+ // otherwise, it's a valid color temp, so we do the normal thing.
   WizCommandSet(["temp":ct])   
   updateCurrentStatus(null,ct,null)  
 }
@@ -417,6 +433,7 @@ def setLevel(BigDecimal lev,BigDecimal duration=0)  {
 def  setEffect(effectNo) {
   logDebug("setEffect to ${effectNo}")
   
+// experimental -- insert code into color temp for Hubitat scenes  
   WizCommandSet(["sceneId":effectNo])
   updateCurrentStatus(null,null,effectNo)  
 }
@@ -445,33 +462,6 @@ def setPreviousEffect() {
 
 // other commands
 
-// if a mac address is set in preferences, and the lookup service is enabled, 
-// ask the remote MAC->ip server for a current ip address
-def getIp() {
-  if (macLookup) {
-   try {
-      params = [uri: "http://${ipServer}/resolve?mac=${macAddr}"] 
- 
-      httpGet(params) { resp ->         
-        json = new groovy.json.JsonSlurper().parseText(resp.data.toString())
-        if (json == null){
-           logDebug "getIp: JsonSlurper returned null"
-          return
-        }
-        else if (json.result) {    
-          device.updateSetting("ip", [value: json.ip, type: "text"])
-          logDebug("Ip address: ${ip}")    
-        } 
-        else 
-          logDebug("getIp failed: ${ip}")                  
-      }         
-    } 
-    catch (Exception e) {
-      logDebug("http GET failed: ${e.message}")
-    }       
-  }
-}
-
 // pulse the light once, over a period of <millis> milliseconds,
 // varying intensity by <intensity>, which can be positive or negative 
 // 
@@ -486,6 +476,8 @@ def setEffectSpeed(BigDecimal speed) {
 }
 
 // Additional color helper functions 
+
+
 
 def validateCT(ct) {
 // restrict range and make sure it's a valid number
@@ -535,9 +527,8 @@ def setGenericTempName(temp){
       else if (value < 4150)  name = "Moonlight"
       else if (value < 5001)  name = "Horizon"
       else if (value < 5500)  name = "Daylight"
-      else if (value < 6000)  name = "Electronic"
-      else if (value < 6501)  name = "Skylight"
-      else if (value < 20000) name = "Polar"
+      else if (value <= 6000)  name = "Electronic"
+      else name = ""
     }  
     sendEvent(name: "colorName", value: name)  
 }
