@@ -14,6 +14,7 @@
  *    2020-3-08   1.0           JEM       Added status requester, update to 1.0
  *    2020-3-13   1.01          JEM       Added duration to setLevel command to make RM happy
  *    2020-7-21   1.1.1         JEM       Use new Hub feature to fix unwanted logging of UDP timeouts.
+ *    2020-10-26  1.1.2         JEM       Enable use of Wiz lighting effects in HE Scenes
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
@@ -38,41 +39,41 @@ import groovy.transform.Field
 
 @Field static List lightEffects = [
     "none",
-    "Ocean",
-    "Romance",
-    "Sunset",
-    "Party",
-    "Fireplace",
-    "Cozy",
-    "Forest",
-    "Pastel Colors",
-    "Wake-up",
-    "Bedtime",
-    "Warm White",
-    "Daylight",
-    "Cool White",
-    "Night Light",
-    "Focus",
-    "Relax",
-    "True Colors",
-    "TV Time",
-    "Plant Growth",
-    "Spring",
-    "Summer",
-    "Fall",
-    "Deep Dive",
-    "Jungle",
-    "Mojito",
-    "Club",
-    "Christmas",
-    "Halloween",
-    "Candlelight",
-    "Golden White",
-    "Pulse",
-    "Steampunk"
+    "1-Ocean",
+    "2=Romance",
+    "3-Sunset",
+    "4-Party",
+    "5-Fireplace",
+    "6-Cozy",
+    "7-Forest",
+    "8-Pastel Colors",
+    "9-Wake-up",
+    "10-Bedtime",
+    "11-Warm White",
+    "12-Daylight",
+    "13-Cool White",
+    "14-Night Light",
+    "15-Focus",
+    "16-Relax",
+    "17-True Colors",
+    "18-TV Time",
+    "19-Plant Growth",
+    "20-Spring",
+    "21-Summer",
+    "22-Fall",
+    "23-Deep Dive",
+    "24-Jungle",
+    "25-Mojito",
+    "26-Club",
+    "27-Christmas",
+    "28-Halloween",
+    "29-Candlelight",
+    "30-Golden White",
+    "31-Pulse",
+    "32-Steampunk"
 ]
  
-def version() {"1.1.1x"}
+def version() {"1.1.2"}
 def commandPort() { "38899" }
 def unknownString() { "none" }
 def statusPort()  { "38899" }  
@@ -100,7 +101,7 @@ metadata {
 
 preferences {
     input("ip", "text", title: "IP Address", description: "IP address of Wiz light", required: true)
-    input name: "pollingInterval", type: "number", title: "Time (seconds) between light status checks", defaultValue: 10    
+    input name: "pollingInterval", type: "number", title: "Time (seconds) between light status checks", defaultValue: 6    
     input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false        
 }
 
@@ -133,6 +134,14 @@ def initialize() {
  
     unschedule()
     state.version = version()
+    
+    val = device.currentValue("colorMode")
+    if (val == null) val = "CT"    
+    state.lastMode = val    // 
+    
+    val = device.currentValue("colorTemperature")
+    val =  (val == null) ? val = 3000 : val.toInteger();   
+    state.lastTemp = val;  // reasonable default color temp
     
     eff = new groovy.json.JsonBuilder(lightEffects)    
     sendEvent(name:"lightEffects",value: eff)   
@@ -319,6 +328,7 @@ def updateCurrentStatus(hsv,ct,effectNo,inParse = false) {
     sendEvent([name: "effectNumber", value: 0])
     sendEvent([name: "effectName", value: unknownString()])      
     
+    state.lastMode = "RGB"
     setGenericColorName(hsv)     
   }
 // setting color temperature  
@@ -332,6 +342,8 @@ def updateCurrentStatus(hsv,ct,effectNo,inParse = false) {
     sendEvent([name: "effectNumber", value: 0])
     sendEvent([name: "effectName", value: unknownString()])       
   
+    state.lastMode = "CT"
+    state.lastTemp = ct
     setGenericTempName(ct)  
   }
 
@@ -341,14 +353,11 @@ def updateCurrentStatus(hsv,ct,effectNo,inParse = false) {
     sendEvent([name:"effectNumber", value:effectNo])
     sendEvent([name:"effectName", value:name]) 
     
-// experimental -- encode effect in color temp for Hubitat scenes
-    ct = 6000+effectNo;    
-    sendEvent([name: "colorTemperature", value: ct])    
-
-// if we're setting effect to <none>, restore the previously
-// set mode and color.  Do nothing if no previous mode, or if  
-// called from parse(), in response to a status message
-    if ((effectNo == 0) && !inParse) {
+// if we're setting effect to 0 - disabling it, we want
+// to restore the previous mode and color.    
+    if (effectNo == 0) {
+      if (inParse) return  // if responding to msg, do nothing
+      
       mode = device.currentValue("colorMode")
       if (mode == null) return
       
@@ -356,16 +365,21 @@ def updateCurrentStatus(hsv,ct,effectNo,inParse = false) {
         setColorTemperature(getDeviceColorTemp())
       } 
       else if (mode.startsWith("RGB")){
-        def color = getDeviceColor()
-       
+        def color = getDeviceColor()      
         setColor(color)
-      }
-
-// if no mode defined, go with a nice normal light bulb-ish color
+      }  
       else {
-        setColorTemperature(3000) // warm white
-      }      
-    }  
+        setColorTemperature(3000) // warm white if no mode set
+      }  
+    }
+
+// experimental -- encode effect in color temp for Hubitat scenes
+    else { 
+      ct = effectNo+6000;    
+      sendEvent([name: "colorMode", value: "CT"])        
+      sendEvent([name: "colorTemperature", value: ct])  
+      setGenericTempName(ct)        
+    }
   }
 }
 
@@ -393,26 +407,21 @@ def setColorTemperature(ct) {
   logDebug("setColorTemperature(${ct})")
   
 // Experimental -- valid color temp range is 2500-6000k
-// We use 6001-6032 to allow Hubitat's scene's app to read
-// and set effects.
-// first, validate color temp.
-  ct = (ct >= 2500) ? ct : 2500;  // limit lower color temp
-  
-// if it's above the max allowable color, check to see if it's
-// an effect code  
-  if (ct > 6000) {
-  
+// We use CT 6001 - 6032 to allow Hubitat's scene's app to read
+// and set effects. 
+
 // if it's an effect code, set the current effect, then set the
-// (now fake) color temp to the coded value  
-     if ((ct > 6000) && (ct <= 6032)) {
-       setEffect(ct - 6000);
-       updateCurrentStatus(null,ct,null)         
-       return;
-     }
-     else {
-     ct = 6000;
-     }
-  } 
+// (now fake) color temp to the coded value and return.
+  if ((ct > 6000) && (ct <= 6032)) {
+//    updateCurrentStatus(null,ct,null)      
+    setEffect(ct-6000);
+    return;
+  }
+
+// otherwise restrict color temp to the bulb's range of
+// 2500-6000K
+  if (ct < 2500) ct = 2500;
+  else if (ct > 6000) ct = 6000;
  
  // otherwise, it's a valid color temp, so we do the normal thing.
   WizCommandSet(["temp":ct])   
@@ -432,8 +441,7 @@ def setLevel(BigDecimal lev,BigDecimal duration=0)  {
 // LightEffects commands
 def  setEffect(effectNo) {
   logDebug("setEffect to ${effectNo}")
-  
-// experimental -- insert code into color temp for Hubitat scenes  
+
   WizCommandSet(["sceneId":effectNo])
   updateCurrentStatus(null,null,effectNo)  
 }
@@ -477,22 +485,6 @@ def setEffectSpeed(BigDecimal speed) {
 
 // Additional color helper functions 
 
-
-
-def validateCT(ct) {
-// restrict range and make sure it's a valid number
-
-  try {
-    if (ct < 1000) ct = 1000
-    else if (ct > 6000) ct = 6000     
-  }
-  catch (Exception e) {      
-      ct = 2500
-  }
-
-  return ct    
-}
-
 def RGBtoHSVMap(rgb) {
     def hsvList = hubitat.helper.ColorUtils.rgbToHSV(rgb)   
     return [hue:hsvList[0], saturation:hsvList[1], level: hsvList[2]]
@@ -517,7 +509,7 @@ def setGenericTempName(temp){
 
     if (temp) {   
       def value = temp.toInteger()
-    
+
       if (value < 2001) name = "Sodium"
       else if (value < 2101)  name = "Starlight"
       else if (value < 2400)  name = "Sunrise"
@@ -528,7 +520,7 @@ def setGenericTempName(temp){
       else if (value < 5001)  name = "Horizon"
       else if (value < 5500)  name = "Daylight"
       else if (value <= 6000)  name = "Electronic"
-      else name = ""
+      else name = unknownString();
     }  
     sendEvent(name: "colorName", value: name)  
 }
