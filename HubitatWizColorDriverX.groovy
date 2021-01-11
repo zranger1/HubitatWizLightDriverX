@@ -1,20 +1,17 @@
 /**
  *
- *  File: HubitatWizLightDriver
+ *  File: HubitatWizLightDriverX
  *  Platform: Hubitat
  *
  *  Allows hubitat to control a wiz color bulb
+ *  Experimental Feature Testbed
  *
  *  Requirements:
  *    A provisioned (with the Wiz app) Wiz color bulb on the local LAN. 
  *
- *    Date        Ver           Who       What
- *    ----        ---           ---       ----
- *    2020-1-12   0.1           JEM       Created
- *    2020-3-08   1.0           JEM       Added status requester, update to 1.0
- *    2020-3-13   1.01          JEM       Added duration to setLevel command to make RM happy
- *    2020-7-21   1.1.1         JEM       Use new Hub feature to fix unwanted logging of UDP timeouts.
- *    2020-10-26  1.1.2         JEM       Enable use of Wiz lighting effects in HE Scenes
+ *    Date         Who       What
+ *    ----         ---       ----
+ *    2021-01-11   JEM       Test - allows Maker API to set IP address.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
@@ -73,13 +70,17 @@ import groovy.transform.Field
     "32-Steampunk"
 ]
  
-def version() {"1.1.2"}
+def version() {"0.x"}
 def commandPort() { "38899" }
 def unknownString() { "none" }
 def statusPort()  { "38899" }  
 
 metadata {
-    definition (name: "Wiz Color Light", namespace: "jem", author: "JEM",importUrl: "") {
+    definition (
+        name: "Wiz Color Light(X)",
+        namespace: "ZRanger1",
+        author: "ZRanger1(JEM)",
+        importUrl: "") {        
         capability "Actuator"
         capability "SignalStrength"  
         capability "LightEffects"
@@ -92,16 +93,18 @@ metadata {
         
         command    "pulse",[[name:"Delta*", type: "NUMBER",,description: "Change in intensity, positive or negative",constraints:[]],
                             [name:"Duration*", type: "NUMBER", description: "Duration in milliseconds", constraints:[]]]                           
-        command    "setEffectSpeed", [[name: "Effect speed*", type: "NUMBER", description: "(0 to 200)", constraints:[]]]     
+        command    "setEffectSpeed", [[name: "Effect speed*", type: "NUMBER", description: "(0 to 200)", constraints:[]]]    
+        command    "setIPAddress", [[name: "IP Address*", type: "string", description: "IPv4 Address", constraints:[]]]    
         
         attribute  "effectNumber","number"
         attribute  "effectSpeed", "number" 
     }
 }
 
-preferences {
+preferences {    
     input("ip", "text", title: "IP Address", description: "IP address of Wiz light", required: true)
     input name: "pollingInterval", type: "number", title: "Time (seconds) between light status checks", defaultValue: 6    
+    input name: "makerIPEnable", type: "bool", title: "Allow Maker API to set IP address", defaultValue: false       
     input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false        
 }
 
@@ -143,6 +146,10 @@ def initialize() {
     val =  (val == null) ? val = 3000 : val.toInteger();   
     state.lastTemp = val;  // reasonable default color temp
     
+    if (makerIPEnable) {
+        state.ipAddress = null
+    }
+    
     eff = new groovy.json.JsonBuilder(lightEffects)    
     sendEvent(name:"lightEffects",value: eff)   
 
@@ -162,8 +169,22 @@ def refresh() {
  * Network infrastructure
  */
  
+def getIPString() {
+  String addr;
+  
+  if (makerIPEnable) {
+     addr = state.ipAddress
+     if (addr == null) addr = ip;
+     addr = addr+":"+commandPort()  
+  }
+  else {
+   addr = ip+":"+commandPort()
+  }
+  return addr;
+} 
+ 
 def sendCommand(String cmd) {
-  def addr = ip+":"+commandPort()
+  def addr = getIPString();
     
   pkt = new hubitat.device.HubAction(cmd,
                      hubitat.device.Protocol.LAN,
@@ -183,7 +204,7 @@ def getCurrentStatus(resched=true) {
   if (ip != null) {
     logDebug("getCurrentStatus")  
   
-    def addr = ip+":"+commandPort()
+    def addr = getIPString()
     String cmd = WizCommandBuilder("getPilot",15,[" "])
     
     pkt = new hubitat.device.HubAction(cmd,
@@ -218,15 +239,22 @@ def WizCommandSet(paramsIn) {
   sendCommand(WizCommandBuilder("setPilot",13,paramsIn))
 }
 
+// NOTE: These items are in priority order.  Be careful about changing it
 def parseLightParams(params) {
-    lev = device.currentValue("level")  
+    lev = device.currentValue("level") 
 
     if (params.containsKey("state")) {    
       sendEvent([name: "switch", value: params.state ? "on" : "off"])       
-    }
+    }   
     if (params.containsKey("dimming")) {
-      sendEvent([name: "level", value: params.dimming])
-      lev = params.dimming.toInteger()
+      if (device.currentValue("switch") == "on") {
+        sendEvent([name: "level", value: params.dimming])
+        lev = params.dimming.toInteger()             
+      }
+      else {
+        sendEvent([name: "level", value: 0]) 
+        lev = 0;
+      }                  
     }
     if (params.containsKey("r")) {
       hsv = RGBtoHSVMap([params.r,params.g,params.b])
@@ -302,12 +330,31 @@ def parse(String description) {
 // Switch commands 
 def on() {         
   WizCommandSet(["state":true])
-  sendEvent([name: "switch", value: "on"])   
+  sendEvent([name: "switch", value: "on"]) 
+
+  lev = device.currentValue("level") 
+  if (lev < 10) {
+    WizCommandSet(["dimming":10])
+    sendEvent([name: "level", value: 10])     
+  }
 }
 
 def off() {
   WizCommandSet(["state":false])
   sendEvent([name: "switch", value: "off"]) 
+}
+
+// light switch management helper
+def setSwitchState(state) {
+  sw = device.currentValue("switch") ? "on" : "off"
+  if (sw == state) return  // switch is already in desired state
+
+// if not in desired state, set switch to new state  
+  if (state) {
+    on() 
+  } else {
+    off()
+  }
 }
 
 // ColorControl commands
@@ -324,7 +371,6 @@ def updateCurrentStatus(hsv,ct,effectNo,inParse = false) {
     sendEvent([name: "saturation", value: hsv.saturation])    
     
     sendEvent([name: "colorMode", value: "RGB"])
-    sendEvent([name: "colorTemperature", value: unknownString()])
     sendEvent([name: "effectNumber", value: 0])
     sendEvent([name: "effectName", value: unknownString()])      
     
@@ -333,10 +379,7 @@ def updateCurrentStatus(hsv,ct,effectNo,inParse = false) {
   }
 // setting color temperature  
   else if (ct != null) {
-    logDebug("updateCurrentStatus - set temp ${ct}")  
-    sendEvent([name: "hue", value: unknownString()])  
-    sendEvent([name: "saturation", value: unknownString()])    
-    
+    logDebug("updateCurrentStatus - set temp ${ct}")     
     sendEvent([name: "colorMode", value: "CT"])
     sendEvent([name: "colorTemperature", value: ct])
     sendEvent([name: "effectNumber", value: 0])
@@ -384,9 +427,16 @@ def updateCurrentStatus(hsv,ct,effectNo,inParse = false) {
 }
 
 def setColor(hsv) {
+    def rgb
+    
     logDebug("setColor(${hsv})")   
-     
-    def rgb = hubitat.helper.ColorUtils.hsvToRGB([hsv.hue, hsv.saturation, hsv.level])
+    try {
+      rgb = hubitat.helper.ColorUtils.hsvToRGB([hsv.hue, hsv.saturation, hsv.level])
+    }
+    catch (e) {
+      logDebug("Attempt to set RGB color w/NaN value - ignoring.")
+      return
+    }
     WizCommandSet(["r":rgb[0],"g":rgb[1],"b":rgb[2]]) 
     
     updateCurrentStatus(hsv,null,null)
@@ -428,14 +478,29 @@ def setColorTemperature(ct) {
   updateCurrentStatus(null,ct,null)  
 }
 
-// SwitchLevel commands
-// set brightness
+// SwitchLevel command
+// Set brightness, turn bulb off if fully dimmed, turn it on
+// if it's off and the dimmer is changed to > 0
 // NOTE - Wiz color bulb does not support levels less than 10, and
 // the duration argument is not currently supported
 def setLevel(BigDecimal lev,BigDecimal duration=0)  {
-  if (lev < 10) lev = 10
-  WizCommandSet(["dimming":lev])
-  sendEvent([name: "level", value: lev]) 
+  
+// if trying to dim below 10%, set the bulb to full dim and
+// turn it off  
+  if (lev < 10) {
+    newSwitchState = 0    
+    WizCommandSet(["dimming":10])
+    sendEvent([name: "level", value: 0]) 
+    setSwitchState(0)    
+  }
+ 
+// otherwise, set to the specified level, checking first to see
+// that the bulb is on (otherwise it won't listen to dimming commands)
+  else {
+    setSwitchState(1)   // turn on light if necessary 
+    WizCommandSet(["dimming":lev])
+    sendEvent([name: "level", value: lev])      
+  }
 }
 
 // LightEffects commands
@@ -481,6 +546,18 @@ def pulse(BigDecimal intensity, BigDecimal millis) {
 def setEffectSpeed(BigDecimal speed) {
   WizCommandSet(["speed":speed])
   sendEvent([name: "effectSpeed", value: speed])   
+}
+
+// maker API can call this to set IP address, enabling mDNS
+// resolution of bulb mac vs. address on remote system.
+def setIPAddress(String addr) {
+   if (makerIPEnable) {
+     logDebug("setIPAdress(${addr})")   
+       state.ipAddress = addr;
+   }   
+   else {
+     logDebug("setIPAddress: request from Maker API denied.");
+   }
 }
 
 // Additional color helper functions 
