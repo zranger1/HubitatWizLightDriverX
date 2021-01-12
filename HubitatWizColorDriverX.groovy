@@ -97,7 +97,8 @@ metadata {
         command    "setIPAddress", [[name: "IP Address*", type: "string", description: "IPv4 Address", constraints:[]]]    
         
         attribute  "effectNumber","number"
-        attribute  "effectSpeed", "number" 
+        attribute  "effectSpeed", "number"         
+        attribute  "macAddress","string"
     }
 }
 
@@ -273,6 +274,9 @@ def parseLightParams(params) {
     if (params.containsKey("rssi")) { 
       sendEvent([name:"rssi", value: params.rssi])
     } 
+    if (params.containsKey("mac")) {
+      sendEvent([name:"macAddress", value: params.mac])
+    }   
 }
 
 // handle command responses & status updates from bulb 
