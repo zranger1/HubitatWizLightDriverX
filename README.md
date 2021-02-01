@@ -28,6 +28,10 @@ Create a new virtual device on your Hubitat, name and label it, and select
 Click the new device on the Hubitat's "Devices" page, and enter your light's
 IP address in the provided field.
 
+## Donation
+If this project saves you time and effort, please consider donating to help support further development.  Every donut or cup of coffee helps!  :-)
+
+[![paypal](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/donate/?hosted_button_id=YM9DKUT5V34G8)
 
 ## Credit where credit is due
 I got protocol and hardware information, and inspiration from the following:

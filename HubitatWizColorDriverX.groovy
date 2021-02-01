@@ -74,6 +74,7 @@ def version() {"0.x"}
 def commandPort() { "38899" }
 def unknownString() { "none" }
 def statusPort()  { "38899" }  
+def minCommandInterval() { 8 }  // command rate throttle - minimum time (ms) between commands
 
 metadata {
     definition (
@@ -141,7 +142,7 @@ def initialize() {
     
     val = device.currentValue("colorMode")
     if (val == null) val = "CT"    
-    state.lastMode = val    // 
+    state.lastMode = val    // Make sure we start in a valid mode
     
     val = device.currentValue("colorTemperature")
     val =  (val == null) ? val = 3000 : val.toInteger();   
@@ -156,7 +157,9 @@ def initialize() {
 
     sendEvent([name: "hue", value: 0])  
     sendEvent([name: "level", value: 100])  
-    sendEvent([name: "saturation", value: 100])      
+    sendEvent([name: "saturation", value: 100])   
+
+    device.updateDataValue("lastCommand",Long.toString(now()))
   
     runIn(pollingInterval, getCurrentStatus)     
 }
@@ -169,6 +172,15 @@ def refresh() {
 /**
  * Network infrastructure
  */
+ 
+def setLastCommandTime() {
+    device.updateDataValue("lastCommand",Long.toString(now()))       
+}
+
+def getLastCommandTime() {
+    s = device.getDataValue("lastCommand")
+    return Long.valueOf(s)
+} 
  
 def getIPString() {
   String addr;
@@ -186,6 +198,13 @@ def getIPString() {
  
 def sendCommand(String cmd) {
   def addr = getIPString();
+  
+// rate throttling -- see if we need to delay before sending the
+// next command.  
+  def t = (now() - getLastCommandTime())
+  if (t < minCommandInterval()) {
+     pauseExecution(1 + minCommandInterval() - t);
+  }
     
   pkt = new hubitat.device.HubAction(cmd,
                      hubitat.device.Protocol.LAN,
